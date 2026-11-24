@@ -12,6 +12,7 @@ from src.models.jobs import Run
 from src.models.source import Dataset
 from src.schemas.requests import ReviewRequest, RunRequest
 from src.services.audit import record
+from src.services.corrections import list_corrections, fingerprint
 from src.services.validation import normalize_params
 from src.utils import views
 from src.utils.wakeup import wake
@@ -26,17 +27,37 @@ def require_job(db, run_id, lock=False):
     return item
 
 
+def _stale_map(db, runs):
+    signatures = {}
+    flags = {}
+    for item in runs:
+        if item.data_fingerprint is None:
+            flags[item.id] = False
+            continue
+        if item.dataset_id not in signatures:
+            dataset = db.get(Dataset, item.dataset_id)
+            signatures[item.dataset_id] = fingerprint(
+                dataset.checksum, list_corrections(db, item.dataset_id)) if dataset else None
+        flags[item.id] = signatures[item.dataset_id] != item.data_fingerprint
+    return flags
+
+
 @router.get('')
 def index(db: Session = Depends(connection), actor: User = Depends(current)):
-    return [views.run(item) for item in db.scalars(select(Run).order_by(Run.id.desc()).limit(100))]
+    items = list(db.scalars(select(Run).order_by(Run.id.desc()).limit(100)))
+    stale = _stale_map(db, items)
+    return [views.run(item, stale=stale[item.id]) for item in items]
 
 
 @router.post('', status_code=202)
 def create(body: RunRequest, db: Session = Depends(connection),
            actor: User = Depends(allow(Role.ADMIN, Role.ANALYST))):
-    if not db.get(Dataset, body.dataset_id):
+    dataset = db.get(Dataset, body.dataset_id)
+    if not dataset:
         raise HTTPException(404, '找不到指定的数据批次')
-    item = Run(name=body.name, dataset_id=body.dataset_id, params=normalize_params(body.params), author=actor.username)
+    item = Run(name=body.name, dataset_id=body.dataset_id, params=normalize_params(body.params),
+               data_fingerprint=fingerprint(dataset.checksum, list_corrections(db, dataset.id)),
+               author=actor.username)
     db.add(item)
     db.flush()
     record(db, actor.username, 'analysis.queued', item.id, dataset_id=item.dataset_id)
@@ -47,7 +68,9 @@ def create(body: RunRequest, db: Session = Depends(connection),
 
 @router.get('/{run_id}')
 def detail(run_id: int, db: Session = Depends(connection), actor: User = Depends(current)):
-    return views.run(require_job(db, run_id), detail=True)
+    item = require_job(db, run_id)
+    stale = _stale_map(db, [item])[item.id]
+    return views.run(item, detail=True, stale=stale)
 
 
 @router.get('/{run_id}/export')
@@ -67,6 +90,8 @@ def review(run_id: int, body: ReviewRequest, db: Session = Depends(connection),
     item = require_job(db, run_id, lock=True)
     if item.status != Status.COMPLETE or item.review != Review.PENDING:
         raise HTTPException(409, '只有已完成且待复核的记录可以提交决定')
+    if _stale_map(db, [item])[item.id]:
+        raise HTTPException(409, '源数据或整包更正已更新，旧结果失效，请重新运行后再复核')
     if body.review == Review.PENDING:
         raise ValueError('请选择通过或退回')
     if body.review == Review.ACCEPTED and not body.decision:

@@ -25,15 +25,21 @@ export async function reviewPage(route, refresh) {
   const {spec, runs} = workspace;
   const completed = runs.filter(run => run.status === 'complete');
   const id = route.id || completed[0]?.id;
-  if (!id) return panel(spec.pages[4], empty('先完成一次运行，再复核结果。','#run',spec.pages[2]));
+  if (!id) return panel(spec.pages[5], empty('先完成一次运行，再复核结果。','#run',spec.pages[3]));
   const job = await workspace.getRun(id);
   if (!job.result) return panel(job.name, empty('当前运行没有可复核结果。',`#results/${job.id}`,'查看运行状态'));
+  const staleNotice = job.stale && el('div',{class:'decision',role:'alert'},
+    p('源数据或整包更正已更新，本结果已失效，不能提交复核。请重新运行后再处理。','feedback'),
+    link('用同批次重新运行',`#run/${job.dataset_id}`,{class:'quiet'}),
+    link('整包与更正',`#packages/${job.dataset_id}`,{class:'quiet'}));
   return el('div', {class:'two-col'},
     panel(job.name, p(job.result.headline,'intro-copy'), p(job.result.note),
       link('查看计算证据',`#results/${id}`,{class:'quiet'}),
-      pill(REVIEW[job.review],job.review),
+      pill(REVIEW[job.review],job.review), job.stale && pill('已失效','returned'),
+      staleNotice,
       job.review_note && el('div',{class:'decision'},p(job.decision),p(job.review_note)),
-      job.review === 'pending' && (session.canReview ? reviewForm(job,spec,refresh) : p('等待业务负责人复核。','subtle'))),
+      !job.stale && job.review === 'pending' && (session.canReview ? reviewForm(job,spec,refresh) : p('等待业务负责人复核。','subtle'))),
     panel('可复核记录', el('ul',{class:'method-list'}, completed.map(run =>
-      el('li',{}, link(run.name,`#review/${run.id}`), ' ', pill(REVIEW[run.review],run.review))))));
+      el('li',{}, link(run.name,`#review/${run.id}`), ' ', pill(REVIEW[run.review],run.review),
+        run.stale && pill('已失效','returned'))))));
 }

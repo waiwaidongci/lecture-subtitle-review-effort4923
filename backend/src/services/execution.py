@@ -8,6 +8,7 @@ from src.domain.spec import SPEC
 from src.models.jobs import Delivery, Run, Schedule
 from src.models.source import Dataset
 from src.services.audit import record
+from src.services.corrections import fingerprint, list_corrections
 from src.utils.exports import write_report
 from src.utils.time import now
 
@@ -57,15 +58,23 @@ def claim():
         job.status = Status.RUNNING
         job.attempt += 1
         job.lease_until = stamp + timedelta(minutes=3)
-        records = db.get(Dataset, job.dataset_id).rows
-        return job.id, job.attempt, records, job.params
+        dataset = db.get(Dataset, job.dataset_id)
+        records = dataset.rows
+        corrections = list_corrections(db, job.dataset_id)
+        job.data_fingerprint = fingerprint(dataset.checksum, corrections)
+        correction_payload = [
+            {"id": item.id, "package_id": item.package_id, "actual_minutes": item.actual_minutes,
+             "reason": item.reason, "author": item.author, "created_at": item.created_at.isoformat()}
+            for item in corrections
+        ]
+        return job.id, job.attempt, records, correction_payload, job.params
 
 
 def execute(lease):
-    job_id, attempt, rows, params = lease
+    job_id, attempt, rows, corrections, params = lease
     result = export = failure = None
     try:
-        result = analyze(rows, params)
+        result = analyze(rows, params, corrections=corrections)
         export = write_report(job_id, attempt, result)
     except ValueError as error:
         failure = str(error)[:500]

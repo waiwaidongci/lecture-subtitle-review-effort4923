@@ -11,7 +11,7 @@ import {date, value} from '../utils/format.js';
 export async function results(route, refresh) {
   const {spec,runs,datasets} = workspace;
   const id = route.id || runs[0]?.id;
-  if (!id) return panel(spec.pages[3],empty('还没有可查看的运行结果。','#run','前往运行'));
+  if (!id) return panel(spec.pages[4],empty('还没有可查看的运行结果。','#run','前往运行'));
   const job = await workspace.getRun(id);
   const source = datasets.find(item => item.id === job.dataset_id);
   const message = feedback();
@@ -31,14 +31,19 @@ export async function results(route, refresh) {
     el('select',{id:'run-picker',onChange:event=>{location.hash=`#results/${event.target.value}`;}},
       (runs.some(item=>item.id===job.id) ? runs : [job,...runs]).map(item=>el('option',{value:item.id,selected:item.id===job.id},item.name))));
   const result = job.result;
+  const staleBanner = job.stale && el('div',{class:'decision',role:'alert','data-testid':'stale-banner'},
+    p('源数据或整包更正已更新，本结果已失效。请重新运行以按最新数据重新归组计算。','feedback'),
+    link('用同批次重新运行',`#run/${job.dataset_id}`,{class:'quiet'}),
+    link('整包与更正',`#packages/${job.dataset_id}`,{class:'quiet'}));
   const analysis = result ? el('section',{class:'analysis','data-testid':'analysis-complete'},
     el('div',{class:'result-head'},p(job.name,'eyeline'),h(2,result.headline),p(result.note,'intro-copy'),
       el('div',{class:'actions'},pill(STATUS[job.status],job.status),download,message)),
+    staleBanner,
     metrics(result.metrics),
     result.charts.map(plot),
     (result.sections || []).map(item=>panel(item.title,p(item.text))),
     result.tables.map(item=>panel(item.title,table(item.columns,item.rows,{caption:item.title}))))
-    : panel(job.name,pill(STATUS[job.status],job.status),p(job.error,'feedback'),link('返回调整参数',`#run/${job.dataset_id}`,{class:'quiet'}));
+    : panel(job.name,pill(STATUS[job.status],job.status),p(job.error,'feedback'),link('返回调整参数',`#run/${job.dataset_id}`,{class:'quiet'})));
   const inputs = spec.params.map(param=>el('div',{},el('dt',{},param.label),el('dd',{},value(job.params[param.key]))));
   return el('div',{},el('div',{class:'two-col'},el('div',{class:'wide-panel'},analysis),
     el('aside',{class:'sidebar-panel'},panel('运行来源',history,

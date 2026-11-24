@@ -69,7 +69,35 @@ def parse_rows(text):
         raise ValueError('CSV 至少需要一行有效数据')
     if hasattr(analysis, 'validate_rows'):
         analysis.validate_rows(rows)
+    validate_packages(rows)
     return rows
+
+
+def validate_packages(rows):
+    """Cross-row rules for package ids and package total minutes."""
+    packages = {}
+    for index, row in enumerate(rows, 1):
+        package_id = row.get('package_id')
+        in_package = bool(package_id)
+        has_total = row.get('package_actual_minutes') is not None
+        if has_total and not in_package:
+            raise ValueError(f'第 {index} 条工单 · 填写整包实耗前请先填写整包包号')
+        if not in_package:
+            continue
+        item = packages.setdefault(package_id, {'rows': [], 'totals': set(), 'total_rows': []})
+        item['rows'].append(index)
+        if has_total:
+            item['totals'].add(row['package_actual_minutes'])
+            item['total_rows'].append(index)
+        if row.get('actual_minutes') is not None:
+            raise ValueError(f'第 {index} 条工单 · 整包工单不能再填写单笔实耗分钟，整包实耗只记在包上')
+    for package_id, item in packages.items():
+        if not item['totals']:
+            raise ValueError(f'包 {package_id} 缺少整包实耗分钟，请在该包任一工单行填写')
+        if len(item['totals']) > 1:
+            lines = '、'.join(str(line) for line in item['total_rows'])
+            raise ValueError(f'包 {package_id} 在第 {lines} 行填写的整包实耗不一致，请统一后再导入')
+    return True
 
 
 def normalize_params(params):

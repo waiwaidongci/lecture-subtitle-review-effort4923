@@ -94,6 +94,7 @@ textarea { resize:vertical; }
 .dictionary { margin-bottom:0; }
 .dictionary > div { display:grid; grid-template-columns: minmax(85px,1fr) 1.25fr; padding:.58rem 0; gap:.45rem; border-top:1px solid var(--line); }
 .dictionary dd { margin:0; overflow-wrap:anywhere; color:var(--muted); font-size:.86rem; }
+.dictionary dd.field-help { grid-column:1 / -1; color:var(--ink); opacity:.78; }
 .result-head { border-top:4px solid var(--accent); }
 .result-head h2 { margin-top:.5rem; font-size:clamp(1.35rem,1.05rem + .84vw,2.04rem); }
 .plot svg { width:100%; max-height:200px; color:var(--accent); fill:currentColor; display:block; }
